@@ -7,58 +7,71 @@ installing `homeassistant`.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 
-def lan_scan(scantime: float = 6.0) -> dict[str, dict[str, Any]]:
-    """Run tinytuya's UDP-broadcast device discovery and return a mapping
-    `{devId: {"ip": str, "version": str | None, ...}}`.
+_LOGGER = logging.getLogger(__name__)
+
+
+def _normalize_scan(raw: Any) -> dict[str, dict[str, Any]]:
+    """Flatten tinytuya's `deviceScan()` output (keyed by IP) into a
+    `{devId: {"ip": ..., "version": ..., ...}}` mapping so callers can
+    look up devices by the identifier that config entries actually use.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for entry in raw.values():
+        if not isinstance(entry, dict):
+            continue
+        dev_id = entry.get("gwId") or entry.get("id")
+        if not dev_id:
+            continue
+        out[dev_id] = entry
+    return out
+
+
+def lan_scan(forcescan: bool = False) -> dict[str, dict[str, Any]]:
+    """Run tinytuya's LAN discovery and return a mapping
+    `{devId: {"ip": str, "version": str, ...}}`.
 
     Blocking — call via `hass.async_add_executor_job` from async contexts.
 
-    tinytuya listens for Tuya heartbeat broadcasts on UDP 6666/6667. The
-    scan runs for `scantime` seconds and silently returns an empty dict
-    if nothing is discovered (UDP broadcast blocked, multi-subnet
-    network, etc.).
-    """
-    try:
-        import tinytuya  # local import so the non-cloud code paths never pay for it
-    except ImportError:
-        return {}
-    try:
-        # Older tinytuya used kw `color`; newer uses `maxdevices`. Both
-        # tolerate no kwargs for a quiet scan.
-        return tinytuya.deviceScan(verbose=False, scantime=scantime) or {}
-    except Exception:
-        # A bound-port collision or a transient ENETUNREACH would otherwise
-        # blow up the config flow; swallow and let the UI fall back to
-        # manual IP entry.
-        return {}
-
-
-def probe_ip(ip: str, scantime: float = 4.0) -> dict[str, Any] | None:
-    """Probe a single LAN IP for a Tuya device and return its scan result,
-    or None if the IP isn't a reachable Tuya device within `scantime`.
-
-    Uses tinytuya's `forcescan` in `deviceScan` with the IP filter. Same
-    blocking semantics as `lan_scan`.
+    Passive mode (default) listens for Tuya heartbeat UDP broadcasts.
+    Forced mode sets `forcescan=True` which adds an active TCP probe of
+    each subnet the host is attached to — catches devices whose
+    broadcasts don't reach the host (common on HAOS VMs and
+    multi-subnet networks). Forced mode is slower (~30s).
     """
     try:
         import tinytuya
     except ImportError:
-        return None
+        _LOGGER.debug("tinytuya not installed — skipping LAN scan")
+        return {}
     try:
-        results = (
-            tinytuya.deviceScan(
-                verbose=False, scantime=scantime, forcescan=[ip],
-            )
-            or {}
-        )
-    except Exception:
-        return None
-    for data in results.values():
-        if isinstance(data, dict) and data.get("ip") == ip:
-            return data
+        raw = tinytuya.deviceScan(verbose=False, forcescan=forcescan)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("tinytuya.deviceScan raised: %s", err)
+        return {}
+    return _normalize_scan(raw)
+
+
+def probe_ip(ip: str) -> dict[str, Any] | None:
+    """Try to locate a Tuya device at `ip`. Returns its scan entry
+    (`{"ip": ..., "gwId": ..., "version": ..., ...}`) or None.
+
+    Strategy: run a normal passive scan first — often enough because a
+    target you know the IP of is typically alive and broadcasting. If
+    passive finds nothing for that IP, escalate to `forcescan=True`
+    which actively probes subnets and tends to hit devices broadcast
+    can't reach.
+    """
+    for forced in (False, True):
+        scan = lan_scan(forcescan=forced)
+        for entry in scan.values():
+            if entry.get("ip") == ip:
+                return entry
     return None
 
 

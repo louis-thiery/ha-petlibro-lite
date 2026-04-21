@@ -2,14 +2,16 @@
   "config": {
     "step": {
       "user": {
-        "title": "Sign in to PetLibro Lite",
-        "description": "Enter the email and password you use in the PetLibro Lite mobile app. The integration will log in, discover your feeder(s) on the LAN, and pull the local key needed for direct control. The password isn't persisted — it's exchanged for a short-lived session.\n\nLAN IP is optional — leave blank to let the integration auto-discover via UDP broadcast. Fill it in only if your router blocks broadcast or the feeder lives on a different subnet.\n\n{reason}",
+        "title": "Sign in to the PetLibro Lite cloud",
+        "description": "This is the same email + password you use to sign into the **PetLibro Lite** mobile app — not your Home Assistant login, not a Tuya developer account. HA makes one cloud call with these to pull your feeder's local key, then switches to LAN-only control. Your password is never stored; only the short-lived session token the login returns.\n\n{reason}",
         "data": {
-          "cloud_email": "Email",
-          "cloud_password": "Password",
-          "cloud_country_code": "Country code",
-          "host": "LAN IP (optional)"
+          "cloud_email": "PetLibro Lite app email",
+          "cloud_password": "PetLibro Lite app password"
         }
+      },
+      "manual_ip": {
+        "title": "Enter feeder LAN IP",
+        "description": "Didn't find a feeder via UDP broadcast. That's common on HAOS VMs or multi-subnet networks. Paste the feeder's LAN IP and we'll probe it directly."
       },
       "pick": {
         "title": "Pick a feeder",
@@ -30,7 +32,8 @@
     "error": {
       "cloud_incomplete": "Enter both email and password.",
       "cloud_auth": "Login rejected — see message above the form for the server's reason.",
-      "no_devices_found": "No PetLibro feeders found on the LAN that belong to this account. Check the feeder is powered on, connected to Wi-Fi, and on the same LAN as Home Assistant. If it is, try again and fill in the LAN IP field manually."
+      "no_devices_found": "No feeder responded on that IP. Confirm the feeder is powered on and connected to Wi-Fi.",
+      "host_required": "Enter the feeder's LAN IP."
     },
     "abort": {
       "already_configured": "This feeder is already configured."

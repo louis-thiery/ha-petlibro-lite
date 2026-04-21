@@ -68,18 +68,20 @@ def _extract_reason(err: Exception) -> str:
     return f"{type(err).__name__}: {err}"
 
 
+# Step 1: just the two required fields. Everything else (country code,
+# manual LAN IP) is handled through a separate follow-up step only when
+# needed, keeping the first-time form short enough to fit any modal.
 USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CLOUD_EMAIL): str,
         vol.Required(CONF_CLOUD_PASSWORD): str,
-        vol.Optional(
-            CONF_CLOUD_COUNTRY_CODE, default=DEFAULT_CLOUD_COUNTRY
-        ): str,
-        # Optional. If set, we'll probe this exact IP instead of broadcast
-        # scanning. Useful when UDP discovery is blocked or the feeder is
-        # on a different subnet.
-        vol.Optional(CONF_HOST, default=""): str,
     }
+)
+
+# Shown only if the cloud login succeeded but LAN discovery yielded no
+# feeders. Gives the user a single-field escape hatch.
+MANUAL_IP_SCHEMA = vol.Schema(
+    {vol.Required(CONF_HOST): str}
 )
 
 VIDEO_DATA_SCHEMA = vol.Schema(
@@ -103,6 +105,9 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._cloud_auth: dict[str, Any] = {}
         self._candidates: list[dict[str, Any]] = []
         self._selected: dict[str, Any] = {}
+        # Remember the host the user typed on the manual-ip step so we
+        # can pass it to _discover on retry without re-prompting.
+        self._manual_ip: str = ""
 
     @staticmethod
     @callback
@@ -122,17 +127,13 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             email = (user_input.get(CONF_CLOUD_EMAIL) or "").strip()
             password = user_input.get(CONF_CLOUD_PASSWORD) or ""
-            country = (
-                user_input.get(CONF_CLOUD_COUNTRY_CODE) or DEFAULT_CLOUD_COUNTRY
-            ).strip() or DEFAULT_CLOUD_COUNTRY
-            manual_ip = (user_input.get(CONF_HOST) or "").strip()
 
             if not email or not password:
                 errors["base"] = "cloud_incomplete"
             else:
                 try:
                     auth = await self.hass.async_add_executor_job(
-                        _run_login, email, password, country,
+                        _run_login, email, password, DEFAULT_CLOUD_COUNTRY,
                     )
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning(
@@ -145,31 +146,10 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._cloud_auth = {
                         CONF_CLOUD_EMAIL: email,
                         CONF_CLOUD_PASSWORD: password,
-                        CONF_CLOUD_COUNTRY_CODE: country,
+                        CONF_CLOUD_COUNTRY_CODE: DEFAULT_CLOUD_COUNTRY,
                         **auth,
                     }
-                    # Discover candidates (LAN scan + per-device cloud lookup).
-                    candidates = await self.hass.async_add_executor_job(
-                        _discover_candidates,
-                        auth["cloud_sid"],
-                        auth["cloud_ecode"],
-                        manual_ip,
-                    )
-                    # Filter out already-configured devIds so we don't show
-                    # the user a feeder they've already set up.
-                    existing = {
-                        e.data.get(CONF_DEVICE_ID)
-                        for e in self._async_current_entries()
-                    }
-                    candidates = [
-                        c for c in candidates
-                        if c[CONF_DEVICE_ID] not in existing
-                    ]
-                    if not candidates:
-                        errors["base"] = "no_devices_found"
-                    else:
-                        self._candidates = candidates
-                        return await self._advance_from_candidates()
+                    return await self._try_discover(manual_ip="")
 
         return self.async_show_form(
             step_id="user",
@@ -177,6 +157,54 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={"reason": reason},
         )
+
+    async def async_step_manual_ip(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Follow-up step shown only when LAN discovery fails. One-field
+        form so the mobile keyboard never covers the input."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            manual_ip = (user_input.get(CONF_HOST) or "").strip()
+            if not manual_ip:
+                errors["base"] = "host_required"
+            else:
+                self._manual_ip = manual_ip
+                return await self._try_discover(manual_ip=manual_ip)
+
+        return self.async_show_form(
+            step_id="manual_ip",
+            data_schema=MANUAL_IP_SCHEMA,
+            errors=errors,
+        )
+
+    async def _try_discover(self, manual_ip: str) -> FlowResult:
+        """Run cloud+LAN discovery with the current auth. Route the user
+        to the next step based on what's found."""
+        auth = self._cloud_auth
+        candidates = await self.hass.async_add_executor_job(
+            _discover_candidates,
+            auth[CONF_CLOUD_SID],
+            auth[CONF_CLOUD_ECODE],
+            manual_ip,
+        )
+        existing = {
+            e.data.get(CONF_DEVICE_ID)
+            for e in self._async_current_entries()
+        }
+        candidates = [
+            c for c in candidates if c[CONF_DEVICE_ID] not in existing
+        ]
+        if not candidates:
+            # Escape hatch — prompt for manual IP (single-field step so
+            # the mobile keyboard doesn't obscure it).
+            return self.async_show_form(
+                step_id="manual_ip",
+                data_schema=MANUAL_IP_SCHEMA,
+                errors={"base": "no_devices_found"},
+            )
+        self._candidates = candidates
+        return await self._advance_from_candidates()
 
     async def _advance_from_candidates(self) -> FlowResult:
         """Either go to the pick step (multi-device) or directly to video."""
@@ -268,14 +296,37 @@ def _discover_candidates(
 
     A device makes it into the list iff the cloud session can successfully
     `tuya.m.device.get` it — i.e. it's paired to this user's account.
+
+    Log level is WARNING (not DEBUG) for the scan + cloud-lookup steps so
+    a user who opens HA logs after a "no devices found" error can see
+    immediately what scan returned and why each devId was dropped.
     """
     results: dict[str, dict[str, Any]] = {}
     if manual_ip:
+        _LOGGER.info("LAN discovery: probing specific IP %s", manual_ip)
         probe = probe_ip(manual_ip)
         if probe and probe.get("gwId"):
             results[probe["gwId"]] = probe
+        else:
+            _LOGGER.warning(
+                "LAN discovery: no Tuya device responded at %s — check the "
+                "IP and that the feeder is on the same LAN as HA",
+                manual_ip,
+            )
     else:
+        _LOGGER.info("LAN discovery: passive broadcast scan")
         results = lan_scan()
+        if not results:
+            _LOGGER.info(
+                "LAN discovery: broadcast found nothing, escalating to "
+                "forced subnet scan (slower, ~30s)"
+            )
+            results = lan_scan(forcescan=True)
+        _LOGGER.warning(
+            "LAN discovery: found %d Tuya device(s): %s",
+            len(results),
+            [f"{d}@{e.get('ip')}" for d, e in results.items()],
+        )
 
     if not results:
         return []
@@ -286,17 +337,25 @@ def _discover_candidates(
         try:
             meta = client.device_get(dev_id)
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug(
+            _LOGGER.warning(
                 "device_get(%s) skipped — not on this account: %s",
                 dev_id, _extract_reason(err),
             )
             continue
         local_key = meta.get("localKey")
         if not local_key:
+            _LOGGER.warning(
+                "device_get(%s) returned no localKey — skipping", dev_id,
+            )
             continue
         ip = scan.get("ip") or manual_ip
         version = scan.get("version")
-        protocol = f"{version:.1f}" if isinstance(version, (int, float)) else DEFAULT_PROTOCOL
+        if isinstance(version, (int, float)):
+            protocol = f"{version:.1f}"
+        elif isinstance(version, str) and version:
+            protocol = version
+        else:
+            protocol = DEFAULT_PROTOCOL
         candidates.append(
             {
                 CONF_DEVICE_ID: dev_id,
@@ -308,6 +367,10 @@ def _discover_candidates(
                 "mac": meta.get("mac") or "",
             }
         )
+    _LOGGER.warning(
+        "LAN discovery: %d candidate(s) matched cloud account",
+        len(candidates),
+    )
     return candidates
 
 
@@ -315,15 +378,23 @@ def _discover_candidates(
 
 
 class PetLibroOptionsFlow(config_entries.OptionsFlow):
-    """Options flow for existing entries. Lets users:
+    """Options / reconfigure flow for an existing entry.
 
-    - Refresh the cloud session (re-login, write new sid/ecode/uid).
-    - Override the LAN IP if the feeder moved to a different address.
-    - Add / update / clear the P2P admin hash (video toggle).
+    Two common paths — the form is identical for both:
+      1. Update video credentials only. Leave the password blank; paste /
+         clear the P2P admin hash; save.
+      2. Re-authenticate against cloud and auto-refresh the LAN IP +
+         localKey. Type a fresh password; save. Discovery runs the same
+         way as first-time setup; if it fails, a manual-IP follow-up step
+         appears so the user can override.
     """
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
+        # Pending updates to merge into `entry.data` once any follow-up
+        # steps finish successfully.
+        self._pending: dict[str, Any] = {}
+        self._new_auth: dict[str, str] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -335,36 +406,26 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             email = (user_input.get(CONF_CLOUD_EMAIL) or "").strip()
             password = user_input.get(CONF_CLOUD_PASSWORD) or ""
-            country = (
-                user_input.get(CONF_CLOUD_COUNTRY_CODE) or DEFAULT_CLOUD_COUNTRY
-            ).strip() or DEFAULT_CLOUD_COUNTRY
-            host_in = (user_input.get(CONF_HOST) or "").strip()
             p2p_user_in = (user_input.get(CONF_P2P_ADMIN_USER) or "").strip()
             p2p_hash_in = (user_input.get(CONF_P2P_ADMIN_HASH) or "").strip()
 
             new_data = dict(current)
-            if host_in:
-                new_data[CONF_HOST] = host_in
             if p2p_hash_in:
                 new_data[CONF_P2P_ADMIN_USER] = (
                     p2p_user_in or DEFAULT_P2P_ADMIN_USER
                 )
                 new_data[CONF_P2P_ADMIN_HASH] = p2p_hash_in
             else:
-                # Explicitly clearing the hash turns video off.
                 new_data.pop(CONF_P2P_ADMIN_USER, None)
                 new_data.pop(CONF_P2P_ADMIN_HASH, None)
 
-            commit = False
-            if not email and not password:
-                # No new cloud creds — keep existing, just apply non-auth changes.
-                commit = True
-            elif not email or not password:
+            if password and not email:
                 errors["base"] = "cloud_incomplete"
-            else:
+            elif password:
+                # Re-auth path: login + rediscover.
                 try:
                     auth = await self.hass.async_add_executor_job(
-                        _run_login, email, password, country,
+                        _run_login, email, password, DEFAULT_CLOUD_COUNTRY,
                     )
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning(
@@ -378,43 +439,17 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
                         {
                             CONF_CLOUD_EMAIL: email,
                             CONF_CLOUD_PASSWORD: password,
-                            CONF_CLOUD_COUNTRY_CODE: country,
+                            CONF_CLOUD_COUNTRY_CODE: DEFAULT_CLOUD_COUNTRY,
                             **auth,
                         }
                     )
-                    # If entry has a devId, re-pull localKey in case it
-                    # rotated (rare, but possible after factory reset +
-                    # re-pair).
-                    dev_id = new_data.get(CONF_DEVICE_ID)
-                    if dev_id:
-                        try:
-                            client = TuyaApiClient(
-                                sid=auth["cloud_sid"],
-                                ecode=auth["cloud_ecode"],
-                            )
-                            meta = await self.hass.async_add_executor_job(
-                                client.device_get, dev_id,
-                            )
-                            if meta.get("localKey"):
-                                new_data[CONF_LOCAL_KEY] = meta["localKey"]
-                        except Exception as err:  # noqa: BLE001
-                            _LOGGER.debug(
-                                "localKey refresh skipped: %s",
-                                _extract_reason(err),
-                            )
-                    commit = True
+                    self._pending = new_data
+                    self._new_auth = auth
+                    return await self._rediscover(manual_ip="")
+            else:
+                # No re-auth — just commit the video toggle change.
+                return await self._commit(new_data)
 
-            if commit:
-                self.hass.config_entries.async_update_entry(
-                    self._entry, data=new_data,
-                )
-                await self.hass.config_entries.async_reload(
-                    self._entry.entry_id,
-                )
-                return self.async_create_entry(title="", data={})
-
-        # Pre-fill from current data where sensible. Leave the password
-        # field empty — users who want to re-auth type it fresh.
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -422,15 +457,6 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_CLOUD_EMAIL, ""),
                 ): str,
                 vol.Optional(CONF_CLOUD_PASSWORD, default=""): str,
-                vol.Optional(
-                    CONF_CLOUD_COUNTRY_CODE,
-                    default=current.get(
-                        CONF_CLOUD_COUNTRY_CODE, DEFAULT_CLOUD_COUNTRY,
-                    ),
-                ): str,
-                vol.Optional(
-                    CONF_HOST, default=current.get(CONF_HOST, ""),
-                ): str,
                 vol.Optional(
                     CONF_P2P_ADMIN_USER,
                     default=current.get(
@@ -449,3 +475,60 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
             description_placeholders={"reason": reason},
         )
+
+    async def async_step_manual_ip(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Escape hatch when discovery fails after re-auth. One-field
+        form so the mobile keyboard doesn't cover the input."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            manual_ip = (user_input.get(CONF_HOST) or "").strip()
+            if not manual_ip:
+                errors["base"] = "host_required"
+            else:
+                return await self._rediscover(manual_ip=manual_ip)
+
+        return self.async_show_form(
+            step_id="manual_ip",
+            data_schema=MANUAL_IP_SCHEMA,
+            errors=errors,
+        )
+
+    async def _rediscover(self, manual_ip: str) -> FlowResult:
+        """Run LAN scan + per-device cloud lookup to refresh host + localKey
+        on the pending entry. Falls back to the manual_ip step if
+        discovery can't find the existing devId."""
+        assert self._new_auth is not None
+        results = await self.hass.async_add_executor_job(
+            _discover_candidates,
+            self._new_auth[CONF_CLOUD_SID],
+            self._new_auth[CONF_CLOUD_ECODE],
+            manual_ip,
+        )
+        target_dev_id = self._pending.get(CONF_DEVICE_ID)
+        match = next(
+            (c for c in results if c[CONF_DEVICE_ID] == target_dev_id),
+            None,
+        )
+        if match is None:
+            # Couldn't find the feeder — prompt for manual IP.
+            return self.async_show_form(
+                step_id="manual_ip",
+                data_schema=MANUAL_IP_SCHEMA,
+                errors={"base": "no_devices_found"},
+            )
+        # Refresh the fields we rediscovered. Protocol is sticky — only
+        # update when discovery gave us a new value.
+        self._pending[CONF_HOST] = match[CONF_HOST]
+        self._pending[CONF_LOCAL_KEY] = match[CONF_LOCAL_KEY]
+        if match.get(CONF_PROTOCOL):
+            self._pending[CONF_PROTOCOL] = match[CONF_PROTOCOL]
+        return await self._commit(self._pending)
+
+    async def _commit(self, new_data: dict[str, Any]) -> FlowResult:
+        self.hass.config_entries.async_update_entry(
+            self._entry, data=new_data,
+        )
+        await self.hass.config_entries.async_reload(self._entry.entry_id)
+        return self.async_create_entry(title="", data={})
