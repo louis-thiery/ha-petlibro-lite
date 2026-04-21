@@ -187,6 +187,21 @@ class TuyaApiClient:
             raise RuntimeError(f"device_log failed: {resp}")
         return resp["result"].get("dps", [])
 
+    def device_get(self, dev_id: str) -> dict:
+        """Fetch the cloud-side metadata for a single device, including
+        `localKey`, `name`, `productId`, `mac`, etc.
+
+        Returns the `result` dict on success. Raises `RuntimeError` with
+        the Tuya error shape on failure (e.g. `DEVICE_NOT_FOUND` when the
+        devId isn't paired to this account).
+        """
+        resp = self.call(
+            "tuya.m.device.get", version="1.0", body={"devId": dev_id},
+        )
+        if not resp.get("success"):
+            raise RuntimeError(f"device_get failed: {resp}")
+        return resp.get("result", {}) or {}
+
     def rtc_session_offer(self, dev_id: str, sdp_offer: dict) -> dict:
         """Call `smartlife.m.rtc.session.offer` to open a WebRTC session.
 

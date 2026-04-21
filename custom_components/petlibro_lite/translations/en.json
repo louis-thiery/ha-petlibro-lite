@@ -2,31 +2,35 @@
   "config": {
     "step": {
       "user": {
-        "title": "PetLibro Lite feeder",
-        "description": "LAN credentials for your already-paired feeder. Extract via tinytuya or see the README. This alone is enough for every feature except live video.",
-        "data": {
-          "device_id": "Device ID",
-          "local_key": "Local key",
-          "host": "Host (LAN IP)",
-          "protocol": "Protocol"
-        }
-      },
-      "video": {
-        "title": "Live video (optional — skip if you don't want a camera entity)",
-        "description": "Video requires your PetLibro Lite account email and password (exchanged for a Tuya session) plus the device's P2P admin hash. See docs/video_setup.md for how to capture the hash. Leave everything blank to skip video — every non-video feature still works.\n\n{reason}",
+        "title": "Sign in to PetLibro Lite",
+        "description": "Enter the email and password you use in the PetLibro Lite mobile app. The integration will log in, discover your feeder(s) on the LAN, and pull the local key needed for direct control. The password isn't persisted — it's exchanged for a short-lived session.\n\nLAN IP is optional — leave blank to let the integration auto-discover via UDP broadcast. Fill it in only if your router blocks broadcast or the feeder lives on a different subnet.\n\n{reason}",
         "data": {
           "cloud_email": "Email",
           "cloud_password": "Password",
           "cloud_country_code": "Country code",
+          "host": "LAN IP (optional)"
+        }
+      },
+      "pick": {
+        "title": "Pick a feeder",
+        "description": "Multiple feeders were found on this account. Choose which one to add.",
+        "data": {
+          "choice": "Feeder"
+        }
+      },
+      "video": {
+        "title": "Live video (optional)",
+        "description": "Video requires a P2P admin hash captured from the PetLibro Lite mobile app — see docs/video_setup.md. Leave both fields blank to skip video. Every non-video feature works without it.",
+        "data": {
           "p2p_admin_user": "P2P admin user",
           "p2p_admin_hash": "P2P admin hash"
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect — verify host, device_id, and local_key.",
-      "cloud_incomplete": "Enter both email and password, or leave both blank to skip video.",
-      "cloud_auth": "Login rejected — see message above the form for the server's reason."
+      "cloud_incomplete": "Enter both email and password.",
+      "cloud_auth": "Login rejected — see message above the form for the server's reason.",
+      "no_devices_found": "No PetLibro feeders found on the LAN that belong to this account. Check the feeder is powered on, connected to Wi-Fi, and on the same LAN as Home Assistant. If it is, try again and fill in the LAN IP field manually."
     },
     "abort": {
       "already_configured": "This feeder is already configured."
@@ -35,19 +39,20 @@
   "options": {
     "step": {
       "init": {
-        "title": "PetLibro Lite video setup",
-        "description": "Add or edit video credentials — PetLibro account email/password and the P2P admin hash. Only needed for the camera entity. Clear fields to turn video off; non-video features are unaffected.\n\n{reason}",
+        "title": "PetLibro Lite settings",
+        "description": "Reconfigure the existing entry. Leave the email + password blank to keep the current cloud session; fill them in to re-authenticate (useful when the session expires or the device's local key rotates after a factory reset).\n\nLAN IP is optional — fill it in only if the feeder moved to a new address.\n\nP2P admin hash controls the camera entity. Leave blank to turn video off; paste a hash to enable it.\n\n{reason}",
         "data": {
           "cloud_email": "Email",
-          "cloud_password": "Password",
+          "cloud_password": "Password (leave blank to keep current session)",
           "cloud_country_code": "Country code",
+          "host": "LAN IP",
           "p2p_admin_user": "P2P admin user",
           "p2p_admin_hash": "P2P admin hash"
         }
       }
     },
     "error": {
-      "cloud_incomplete": "Enter both email and password, or leave both blank to turn video off.",
+      "cloud_incomplete": "Enter both email and password, or leave both blank to keep the current session.",
       "cloud_auth": "Login rejected — see message above the form for the server's reason."
     }
   },

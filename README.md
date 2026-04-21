@@ -74,16 +74,17 @@ Copy `custom_components/petlibro_lite/` into your HA `config/custom_components/`
 
 ## First-time setup
 
-1. **Extract device credentials** from the Tuya account that paired your feeder. `tinytuya` is the easiest:
-   ```
-   pip install tinytuya
-   python -m tinytuya scan
-   ```
-   You need `device_id`, `local_key`, and the feeder's LAN IP. Protocol version for PLAF203 is `3.4`.
+Only thing required: your **PetLibro Lite mobile app email + password**.
 
-2. **Add the integration** in HA and fill in those four fields.
+**Settings → Devices & Services → Add Integration → PetLibro Lite.**
 
-3. A second "Live video" step will appear — all fields there are optional and only feed the camera platform. Leave everything blank to run without video; every other entity still works.
+The integration signs into Tuya's whitelabel cloud with those credentials, runs a LAN UDP scan to find your feeder, and calls `tuya.m.device.get` once per discovered device to pull the `localKey` — everything needed for LAN control is derived automatically. Your password isn't persisted; only the short-lived session tokens are.
+
+If you have multiple feeders, you'll see a picker. If your router blocks UDP broadcast or the feeder is on a different subnet, there's an optional "LAN IP" field on the first step that skips scanning.
+
+Optional second step — **Live video**: paste a P2P admin hash (capture via the procedure in [`docs/video_setup.md`](./docs/video_setup.md)) to register a camera entity. Leave blank to run without video.
+
+> Note: this integration depends on the [`tinytuya`](https://github.com/jasonacox/tinytuya) Python library but handles discovery itself — you don't need to run `tinytuya wizard` yourself. And **it's unrelated to the LocalTuya HACS integration**, despite the similar name.
 
 ## Video setup
 
