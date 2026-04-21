@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.local
+.DS_Store
+*.log
+
+# Lovelace card build artifacts (keep the committed www/ copy in the
+# integration; dist/ + node_modules/ are intermediate).
+lovelace-card/dist/
+lovelace-card/node_modules/
+lovelace-card/test-*.mjs
+
+# IDE noise
+.idea/
+.vscode/
+*.swp

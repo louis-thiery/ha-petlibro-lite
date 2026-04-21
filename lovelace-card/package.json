@@ -1,0 +1,17 @@
+{
+  "name": "petlibro-lovelace-card",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Lovelace custom card for the ha-petlibro-lite HACS integration",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/petlibro-feeder-card.ts --bundle --minify --format=esm --target=es2020 --outfile=dist/petlibro-feeder-card.js && cp dist/petlibro-feeder-card.js ../custom_components/petlibro_lite/www/petlibro-feeder-card.js"
+  },
+  "dependencies": {
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

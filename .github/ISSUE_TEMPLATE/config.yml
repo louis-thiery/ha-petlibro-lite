@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup question
+    url: https://github.com/louis-thiery/ha-petlibro-lite/discussions/categories/q-a
+    about: Getting started, extracting a localKey, cloud login failures, etc.
+  - name: HACS installation help
+    url: https://hacs.xyz/docs/faq/custom_repositories
+    about: Problems adding the repo or installing custom integrations via HACS.
+  - name: PetLibro (main app) integration
+    url: https://github.com/jjjonesjr33/petlibro
+    about: If your feeder uses the "PetLibro" app (not "PetLibro Lite"), go there instead.

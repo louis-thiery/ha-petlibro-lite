@@ -1,0 +1,44 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install project
+        run: |
+          source $HOME/.local/bin/env
+          uv sync
+      - name: Run pytest
+        run: |
+          source $HOME/.local/bin/env
+          uv run pytest -q
+
+  lovelace-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: lovelace-card/package-lock.json
+      - name: Install card deps
+        working-directory: lovelace-card
+        run: npm ci || npm install
+      - name: Build card
+        working-directory: lovelace-card
+        run: npm run build
+      - name: Verify bundle in integration www/
+        run: test -f custom_components/petlibro_lite/www/petlibro-feeder-card.js

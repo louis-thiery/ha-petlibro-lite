@@ -1,0 +1,140 @@
+feed:
+  name: Feed
+  description: Dispense N portions now (DP 232).
+  fields:
+    device_id:
+      name: Feeder
+      description: The PetLibro Lite feeder to act on.
+      required: true
+      selector:
+        device:
+          integration: petlibro_lite
+    portions:
+      name: Portions
+      description: Number of portions to dispense (1-50).
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 1
+          mode: box
+
+schedule_add:
+  name: Add schedule
+  description: Append a new scheduled feed slot.
+  fields:
+    device_id:
+      name: Feeder
+      required: true
+      selector:
+        device:
+          integration: petlibro_lite
+    hour:
+      required: true
+      selector:
+        number: { min: 0, max: 23, mode: box }
+    minute:
+      required: true
+      selector:
+        number: { min: 0, max: 59, mode: box }
+    portions:
+      required: true
+      selector:
+        number: { min: 1, max: 50, mode: box }
+    enabled:
+      required: true
+      selector:
+        boolean:
+    days:
+      required: true
+      description: Days of week (mon,tue,wed,thu,fri,sat,sun).
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+
+schedule_update:
+  name: Update schedule
+  description: Patch one existing schedule slot by index. All fields except `index` are optional.
+  fields:
+    device_id:
+      name: Feeder
+      required: true
+      selector:
+        device:
+          integration: petlibro_lite
+    index:
+      required: true
+      description: 0-based slot position to modify.
+      selector:
+        number: { min: 0, mode: box }
+    hour:
+      selector:
+        number: { min: 0, max: 23, mode: box }
+    minute:
+      selector:
+        number: { min: 0, max: 59, mode: box }
+    portions:
+      selector:
+        number: { min: 1, max: 50, mode: box }
+    enabled:
+      selector:
+        boolean:
+    days:
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+
+schedule_remove:
+  name: Remove schedule
+  description: Remove one scheduled feed slot by index.
+  fields:
+    device_id:
+      name: Feeder
+      required: true
+      selector:
+        device:
+          integration: petlibro_lite
+    index:
+      required: true
+      selector:
+        number: { min: 0, mode: box }
+
+schedule_set_all:
+  name: Set all schedules
+  description: Replace the entire schedule list in one call.
+  fields:
+    device_id:
+      name: Feeder
+      required: true
+      selector:
+        device:
+          integration: petlibro_lite
+    slots:
+      required: true
+      description: "Full list of slots. Each slot is a dict with hour, minute, portions, enabled, days."
+      selector:
+        object:
+
+refresh_state:
+  name: Refresh state
+  description: >
+    Force an immediate LAN state poll (DPs including schedules, feeds,
+    warnings). Bypasses the 10-second poll interval so the dashboard can
+    show the freshest state when the user opens a dialog — useful when
+    schedules were edited from the PetLibro app and HA hasn't caught up
+    yet.
+  fields:
+    device_id:
+      name: Feeder
+      required: false
+      description: >
+        Optional — restricts the refresh to a specific feeder when
+        multiple are configured. If omitted every configured feeder's
+        LAN coordinator is refreshed.
+      selector:
+        device:
+          integration: petlibro_lite

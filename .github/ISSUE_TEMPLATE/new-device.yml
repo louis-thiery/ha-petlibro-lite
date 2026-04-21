@@ -1,0 +1,41 @@
+name: New device support
+description: A PetLibro Lite feeder model not yet tested with this integration.
+labels: ["new-device"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This integration was developed against a PLAF203. Other PetLibro
+        Lite-branded feeders likely use the same Tuya-whitelabel protocol
+        and DP scheme, but they haven't all been verified.
+
+        The way to add support is a short test session: LAN DP dump and
+        app walkthrough. If you're game, fill out this issue and I'll
+        walk through it with you.
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: "Exact model number printed under the base plate (e.g. PLAF108)."
+    validations:
+      required: true
+  - type: input
+    id: product_name
+    attributes:
+      label: Marketing name
+      placeholder: Air Smart Feeder
+  - type: checkboxes
+    id: app
+    attributes:
+      label: Which mobile app does it pair with?
+      options:
+        - label: PetLibro Lite
+        - label: PetLibro (the main app — use [jjjonesjr33/petlibro](https://github.com/jjjonesjr33/petlibro) instead)
+        - label: Other (Tuya Smart, Smart Life, etc.)
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Anything else worth knowing
+      description: Camera, battery backup, multiple bowls, RFID, wet food, etc.

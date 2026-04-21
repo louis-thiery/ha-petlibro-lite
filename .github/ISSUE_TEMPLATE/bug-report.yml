@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the integration is misbehaving.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you file, please grab the diagnostics export — it has the
+        redacted config plus the last coordinator state, which covers most
+        debugging without back-and-forth.
+
+        To download: Settings → Devices & Services → PetLibro Lite →
+        three-dot menu on the device → Download diagnostics. Credentials
+        are redacted automatically.
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to see?
+      placeholder: |
+        I called petlibro_lite.feed with portions=3 and the feeder did
+        nothing / dispensed 1 portion / threw an error.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Lovelace card
+        2. Tap the "3 portions" button
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      description: "Settings → About (e.g. 2025.4.3)"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: PetLibro Lite version
+      description: "Settings → Devices & Services → PetLibro Lite → … → About"
+    validations:
+      required: true
+  - type: input
+    id: feeder_model
+    attributes:
+      label: Feeder model
+      description: "Printed under the base plate."
+      placeholder: PLAF203
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: |
+        Settings → System → Logs. Filter for "petlibro_lite" and paste any
+        error / warning lines near the time of the bug.
+      render: shell
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: "Attach the JSON downloaded above if you can — optional but helpful."

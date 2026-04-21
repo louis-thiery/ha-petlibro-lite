@@ -1,0 +1,25 @@
+[project]
+name = "ha-petlibro-lite"
+version = "0.1.0"
+description = "Home Assistant integration for PetLibro Lite app feeders (PLAF203 and related Tuya-whitelabel models)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Louis Thiery" }]
+dependencies = [
+    "tinytuya>=1.16.0",
+    "httpx>=0.27",
+    "pycryptodome>=3.20",
+    "aioice>=0.10",
+    "paho-mqtt>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"

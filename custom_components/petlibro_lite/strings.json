@@ -1,0 +1,81 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PetLibro Lite feeder",
+        "description": "LAN credentials for your already-paired feeder. Extract via tinytuya or see the README. This alone is enough for every feature except live video.",
+        "data": {
+          "device_id": "Device ID",
+          "local_key": "Local key",
+          "host": "Host (LAN IP)",
+          "protocol": "Protocol"
+        }
+      },
+      "video": {
+        "title": "Live video (optional — skip if you don't want a camera entity)",
+        "description": "Video requires your PetLibro Lite account email and password (exchanged for a Tuya session) plus the device's P2P admin hash. See docs/video_setup.md for how to capture the hash. Leave everything blank to skip video — every non-video feature still works.\n\n{reason}",
+        "data": {
+          "cloud_email": "Email",
+          "cloud_password": "Password",
+          "cloud_country_code": "Country code",
+          "p2p_admin_user": "P2P admin user",
+          "p2p_admin_hash": "P2P admin hash"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect — verify host, device_id, and local_key.",
+      "cloud_incomplete": "Enter both email and password, or leave both blank to skip video.",
+      "cloud_auth": "Login rejected — see message above the form for the server's reason."
+    },
+    "abort": {
+      "already_configured": "This feeder is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PetLibro Lite video setup",
+        "description": "Add or edit video credentials — PetLibro account email/password and the P2P admin hash. Only needed for the camera entity. Clear fields to turn video off; non-video features are unaffected.\n\n{reason}",
+        "data": {
+          "cloud_email": "Email",
+          "cloud_password": "Password",
+          "cloud_country_code": "Country code",
+          "p2p_admin_user": "P2P admin user",
+          "p2p_admin_hash": "P2P admin hash"
+        }
+      }
+    },
+    "error": {
+      "cloud_incomplete": "Enter both email and password, or leave both blank to turn video off.",
+      "cloud_auth": "Login rejected — see message above the form for the server's reason."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "state":               { "name": "State" },
+      "food_level":          { "name": "Food level" },
+      "warning":             { "name": "Warning" },
+      "last_manual_feed":    { "name": "Last manual feed" },
+      "last_scheduled_feed": { "name": "Last scheduled feed" },
+      "schedules":           { "name": "Schedules" },
+      "next_feed":           { "name": "Next feed" },
+      "portions_today":      { "name": "Portions today" },
+      "feed_log":            { "name": "Feed log" }
+    },
+    "binary_sensor": {
+      "feeding_plan_active": { "name": "Feeding plan active" }
+    },
+    "number": {
+      "feed_portions": { "name": "Feed portions" }
+    },
+    "button": {
+      "feed_1": { "name": "Feed 1 portion" },
+      "feed_2": { "name": "Feed 2 portions" },
+      "feed_3": { "name": "Feed 3 portions" }
+    },
+    "switch": {
+      "master": { "name": "Master" }
+    }
+  }
+}
