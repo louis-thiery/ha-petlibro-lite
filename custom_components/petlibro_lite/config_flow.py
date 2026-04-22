@@ -1,22 +1,24 @@
 """UI config flow for the PetLibro Lite integration.
 
-v0.2 auto-setup flow:
+Setup flow:
 
-  1. `user` step — single form: PetLibro Lite email + password (required) +
-     optional LAN IP override. We log in to the cloud, run a tinytuya LAN
-     scan, and for every Tuya device found on the LAN we call
-     `tuya.m.device.get` with the fresh session to fetch its `localKey`.
-     Any device that returns successfully is one the account owns.
-  2. `pick` step — shown only if more than one eligible feeder is found
-     and more than one is not yet configured in HA.
-  3. `video` step — optional. P2P admin user + hash. Leaving blank
-     registers no camera platform; every non-video feature works.
+  1. `user` step — single form: PetLibro Lite email + password. We log
+     into the Tuya whitelabel cloud, run a tinytuya LAN scan, and for
+     every Tuya device found we call `tuya.m.device.get` to fetch its
+     `localKey`. Any device that returns successfully is one the account
+     owns.
+  2. `pick` step — shown only when multiple unconfigured feeders are
+     found on the account.
 
-For existing users upgrading from the manual-entry flow, the stored
-entry shape is unchanged (`device_id`, `local_key`, `host`, `protocol`,
-plus the cloud + video fields). A reconfigure flow is also exposed so
-existing entries can refresh their cloud session or swap to a different
-feeder on the account without deletion.
+Live video works out of the box. The P2P admin hash is derived from
+cloud credentials at setup time (and again on re-auth) — no manual
+capture step, no optional toggle. Users who previously configured the
+integration without a hash get one filled in automatically on first
+post-upgrade load.
+
+A reconfigure flow is exposed so existing entries can refresh their
+cloud session or swap to a different feeder on the account without
+deletion.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .cloud import TuyaApiClient
+from .cloud.api import derive_admin_hash_sync
 from .cloud.login import login as cloud_login
 from .const import (
     CONF_CLOUD_COUNTRY_CODE,
@@ -56,6 +59,32 @@ from .helpers import lan_scan, probe_ip
 from .tuya_client import TuyaClient, TuyaClientError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_fetch_admin_hash(
+    hass: HomeAssistant,
+    sid: str,
+    ecode: str,
+    dev_id: str,
+    local_key: str,
+    context: str,
+) -> str | None:
+    """Derive the P2P admin hash in an executor, swallowing failures.
+
+    Returned value is the hex hash on success, or None if the cloud
+    flow failed — callers should treat None as "camera unavailable
+    until the session is refreshed" and continue.
+    """
+    try:
+        return await hass.async_add_executor_job(
+            derive_admin_hash_sync, sid, ecode, dev_id, local_key,
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning(
+            "admin-hash derivation failed (%s): %s: %s",
+            context, type(err).__name__, err,
+        )
+        return None
 
 _ERRMSG_RE = re.compile(r"'errorMsg':\s*'([^']+)'")
 
@@ -82,13 +111,6 @@ USER_DATA_SCHEMA = vol.Schema(
 # feeders. Gives the user a single-field escape hatch.
 MANUAL_IP_SCHEMA = vol.Schema(
     {vol.Required(CONF_HOST): str}
-)
-
-VIDEO_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_P2P_ADMIN_USER, default=DEFAULT_P2P_ADMIN_USER): str,
-        vol.Optional(CONF_P2P_ADMIN_HASH, default=""): str,
-    }
 )
 
 
@@ -207,12 +229,12 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self._advance_from_candidates()
 
     async def _advance_from_candidates(self) -> FlowResult:
-        """Either go to the pick step (multi-device) or directly to video."""
+        """Either go to the pick step (multi-device) or finalize directly."""
         if len(self._candidates) == 1:
             self._selected = self._candidates[0]
             await self.async_set_unique_id(self._selected[CONF_DEVICE_ID])
             self._abort_if_unique_id_configured()
-            return await self.async_step_video()
+            return await self._finalize()
         return await self.async_step_pick()
 
     # -- Step 2: pick (only when multiple feeders) -------------------------
@@ -232,32 +254,36 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             await self.async_set_unique_id(self._selected[CONF_DEVICE_ID])
             self._abort_if_unique_id_configured()
-            return await self.async_step_video()
+            return await self._finalize()
 
         schema = vol.Schema({vol.Required("choice"): vol.In(options)})
         return self.async_show_form(step_id="pick", data_schema=schema)
 
-    # -- Step 3: optional video --------------------------------------------
+    # -- Entry finalization ------------------------------------------------
 
-    async def async_step_video(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        if user_input is not None:
-            p2p_user = (user_input.get(CONF_P2P_ADMIN_USER) or "").strip()
-            p2p_hash = (user_input.get(CONF_P2P_ADMIN_HASH) or "").strip()
-            data = self._build_entry_data(p2p_user, p2p_hash)
-            # Title is the cloud-returned name when present, else a
-            # "PetLibro <last6>" fallback.
-            title = self._selected.get("name") or (
-                f"PetLibro {self._selected[CONF_DEVICE_ID][-6:]}"
-            )
-            return self.async_create_entry(title=title, data=data)
-
-        return self.async_show_form(
-            step_id="video", data_schema=VIDEO_DATA_SCHEMA,
+    async def _finalize(self) -> FlowResult:
+        """Derive the P2P admin hash from the cloud session, then create
+        the config entry. Admin hash derivation failures are logged but
+        non-fatal — the entry still gets created without it, and the
+        camera entity will turn on as soon as re-auth succeeds.
+        """
+        auth = self._cloud_auth
+        admin_hash = await async_fetch_admin_hash(
+            self.hass,
+            auth[CONF_CLOUD_SID],
+            auth[CONF_CLOUD_ECODE],
+            self._selected[CONF_DEVICE_ID],
+            self._selected[CONF_LOCAL_KEY],
+            "initial setup",
         )
 
-    def _build_entry_data(self, p2p_user: str, p2p_hash: str) -> dict[str, Any]:
+        data = self._build_entry_data(admin_hash)
+        title = self._selected.get("name") or (
+            f"PetLibro {self._selected[CONF_DEVICE_ID][-6:]}"
+        )
+        return self.async_create_entry(title=title, data=data)
+
+    def _build_entry_data(self, admin_hash: str | None) -> dict[str, Any]:
         data: dict[str, Any] = {
             CONF_DEVICE_ID: self._selected[CONF_DEVICE_ID],
             CONF_LOCAL_KEY: self._selected[CONF_LOCAL_KEY],
@@ -265,9 +291,9 @@ class PetLibroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_PROTOCOL: self._selected.get(CONF_PROTOCOL, DEFAULT_PROTOCOL),
             **self._cloud_auth,
         }
-        if p2p_hash:
-            data[CONF_P2P_ADMIN_USER] = p2p_user or DEFAULT_P2P_ADMIN_USER
-            data[CONF_P2P_ADMIN_HASH] = p2p_hash
+        if admin_hash:
+            data[CONF_P2P_ADMIN_USER] = DEFAULT_P2P_ADMIN_USER
+            data[CONF_P2P_ADMIN_HASH] = admin_hash
         return data
 
 
@@ -380,13 +406,11 @@ def _discover_candidates(
 class PetLibroOptionsFlow(config_entries.OptionsFlow):
     """Options / reconfigure flow for an existing entry.
 
-    Two common paths — the form is identical for both:
-      1. Update video credentials only. Leave the password blank; paste /
-         clear the P2P admin hash; save.
-      2. Re-authenticate against cloud and auto-refresh the LAN IP +
-         localKey. Type a fresh password; save. Discovery runs the same
-         way as first-time setup; if it fails, a manual-IP follow-up step
-         appears so the user can override.
+    Re-authenticates against the cloud and refreshes the LAN IP +
+    localKey + P2P admin hash. Typical use: session expired, feeder got
+    a new IP, or the user factory-reset and re-paired (which rotates
+    localKey). If discovery can't locate the feeder on the LAN, a
+    follow-up manual-IP step appears.
     """
 
     def __init__(self, config_entry: ConfigEntry) -> None:
@@ -406,23 +430,10 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             email = (user_input.get(CONF_CLOUD_EMAIL) or "").strip()
             password = user_input.get(CONF_CLOUD_PASSWORD) or ""
-            p2p_user_in = (user_input.get(CONF_P2P_ADMIN_USER) or "").strip()
-            p2p_hash_in = (user_input.get(CONF_P2P_ADMIN_HASH) or "").strip()
 
-            new_data = dict(current)
-            if p2p_hash_in:
-                new_data[CONF_P2P_ADMIN_USER] = (
-                    p2p_user_in or DEFAULT_P2P_ADMIN_USER
-                )
-                new_data[CONF_P2P_ADMIN_HASH] = p2p_hash_in
-            else:
-                new_data.pop(CONF_P2P_ADMIN_USER, None)
-                new_data.pop(CONF_P2P_ADMIN_HASH, None)
-
-            if password and not email:
+            if not email or not password:
                 errors["base"] = "cloud_incomplete"
-            elif password:
-                # Re-auth path: login + rediscover.
+            else:
                 try:
                     auth = await self.hass.async_add_executor_job(
                         _run_login, email, password, DEFAULT_CLOUD_COUNTRY,
@@ -435,6 +446,7 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
                     reason = _extract_reason(err)
                     errors["base"] = reason or "cloud_auth"
                 else:
+                    new_data = dict(current)
                     new_data.update(
                         {
                             CONF_CLOUD_EMAIL: email,
@@ -446,27 +458,14 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
                     self._pending = new_data
                     self._new_auth = auth
                     return await self._rediscover(manual_ip="")
-            else:
-                # No re-auth — just commit the video toggle change.
-                return await self._commit(new_data)
 
         schema = vol.Schema(
             {
-                vol.Optional(
+                vol.Required(
                     CONF_CLOUD_EMAIL,
                     default=current.get(CONF_CLOUD_EMAIL, ""),
                 ): str,
-                vol.Optional(CONF_CLOUD_PASSWORD, default=""): str,
-                vol.Optional(
-                    CONF_P2P_ADMIN_USER,
-                    default=current.get(
-                        CONF_P2P_ADMIN_USER, DEFAULT_P2P_ADMIN_USER,
-                    ),
-                ): str,
-                vol.Optional(
-                    CONF_P2P_ADMIN_HASH,
-                    default=current.get(CONF_P2P_ADMIN_HASH, ""),
-                ): str,
+                vol.Required(CONF_CLOUD_PASSWORD): str,
             }
         )
         return self.async_show_form(
@@ -496,9 +495,9 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def _rediscover(self, manual_ip: str) -> FlowResult:
-        """Run LAN scan + per-device cloud lookup to refresh host + localKey
-        on the pending entry. Falls back to the manual_ip step if
-        discovery can't find the existing devId."""
+        """Run LAN scan + per-device cloud lookup to refresh host +
+        localKey + admin hash on the pending entry. Falls back to the
+        manual_ip step if discovery can't find the existing devId."""
         assert self._new_auth is not None
         results = await self.hass.async_add_executor_job(
             _discover_candidates,
@@ -524,6 +523,20 @@ class PetLibroOptionsFlow(config_entries.OptionsFlow):
         self._pending[CONF_LOCAL_KEY] = match[CONF_LOCAL_KEY]
         if match.get(CONF_PROTOCOL):
             self._pending[CONF_PROTOCOL] = match[CONF_PROTOCOL]
+        # Re-derive admin hash. localKey rotates on re-pair, so the old
+        # hash would be stale; this also covers the first-time-post-
+        # upgrade case where the existing entry has no hash at all.
+        admin_hash = await async_fetch_admin_hash(
+            self.hass,
+            self._new_auth[CONF_CLOUD_SID],
+            self._new_auth[CONF_CLOUD_ECODE],
+            target_dev_id,
+            match[CONF_LOCAL_KEY],
+            "reconfigure",
+        )
+        if admin_hash:
+            self._pending[CONF_P2P_ADMIN_USER] = DEFAULT_P2P_ADMIN_USER
+            self._pending[CONF_P2P_ADMIN_HASH] = admin_hash
         return await self._commit(self._pending)
 
     async def _commit(self, new_data: dict[str, Any]) -> FlowResult:

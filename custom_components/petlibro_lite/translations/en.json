@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Sign in to the PetLibro Lite cloud",
-        "description": "This is the same email + password you use to sign into the **PetLibro Lite** mobile app — not your Home Assistant login, not a Tuya developer account. HA makes one cloud call with these to pull your feeder's local key, then switches to LAN-only control. Your password is never stored; only the short-lived session token the login returns.\n\n{reason}",
+        "description": "Use the same email + password as the **PetLibro Lite** mobile app (not your Home Assistant login, not a Tuya developer account). One sign-in gets you the whole integration — LAN feeding, schedules, sensors, and the live camera.\n\n{reason}",
         "data": {
           "cloud_email": "PetLibro Lite app email",
           "cloud_password": "PetLibro Lite app password"
@@ -18,14 +18,6 @@
         "description": "Multiple feeders were found on this account. Choose which one to add.",
         "data": {
           "choice": "Feeder"
-        }
-      },
-      "video": {
-        "title": "Live video (optional)",
-        "description": "Video requires a P2P admin hash captured from the PetLibro Lite mobile app — see docs/video_setup.md. Leave both fields blank to skip video. Every non-video feature works without it.",
-        "data": {
-          "p2p_admin_user": "P2P admin user",
-          "p2p_admin_hash": "P2P admin hash"
         }
       }
     },
@@ -42,21 +34,23 @@
   "options": {
     "step": {
       "init": {
-        "title": "PetLibro Lite settings",
-        "description": "Reconfigure the existing entry. Leave the email + password blank to keep the current cloud session; fill them in to re-authenticate (useful when the session expires or the device's local key rotates after a factory reset).\n\nLAN IP is optional — fill it in only if the feeder moved to a new address.\n\nP2P admin hash controls the camera entity. Leave blank to turn video off; paste a hash to enable it.\n\n{reason}",
+        "title": "Re-authenticate PetLibro Lite",
+        "description": "Sign in again to refresh the cloud session. Use this when video stops working, the feeder's LAN IP changed, or you factory-reset and re-paired the feeder. Discovery reruns the same way as first-time setup.\n\n{reason}",
         "data": {
-          "cloud_email": "Email",
-          "cloud_password": "Password (leave blank to keep current session)",
-          "cloud_country_code": "Country code",
-          "host": "LAN IP",
-          "p2p_admin_user": "P2P admin user",
-          "p2p_admin_hash": "P2P admin hash"
+          "cloud_email": "PetLibro Lite app email",
+          "cloud_password": "PetLibro Lite app password"
         }
+      },
+      "manual_ip": {
+        "title": "Enter feeder LAN IP",
+        "description": "Didn't find the feeder via UDP broadcast. Paste its LAN IP and we'll probe it directly."
       }
     },
     "error": {
-      "cloud_incomplete": "Enter both email and password, or leave both blank to keep the current session.",
-      "cloud_auth": "Login rejected — see message above the form for the server's reason."
+      "cloud_incomplete": "Enter both email and password.",
+      "cloud_auth": "Login rejected — see message above the form for the server's reason.",
+      "no_devices_found": "No feeder responded on that IP. Confirm the feeder is powered on and connected to Wi-Fi.",
+      "host_required": "Enter the feeder's LAN IP."
     }
   },
   "entity": {

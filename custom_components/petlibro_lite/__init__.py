@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 
+from .config_flow import async_fetch_admin_hash
 from .const import (
     CONF_CLOUD_ECODE,
     CONF_CLOUD_SID,
@@ -50,6 +51,9 @@ class PetLibroRuntime:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not entry.data.get(CONF_P2P_ADMIN_HASH) and entry.data.get(CONF_CLOUD_SID):
+        hass.async_create_task(_try_populate_admin_hash(hass, entry))
+
     client = TuyaClient(
         device_id=entry.data[CONF_DEVICE_ID],
         local_key=entry.data[CONF_LOCAL_KEY],
@@ -97,18 +101,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _try_populate_admin_hash(
+    hass: HomeAssistant, entry: ConfigEntry,
+) -> None:
+    """Best-effort admin-hash backfill for legacy entries.
+
+    Existing entries from before the integration auto-derived the hash
+    have the cloud session and localKey stored, but no `p2p_admin_hash`.
+    Derive one asynchronously and reload the entry so the camera
+    platform registers without requiring a second HA restart.
+    """
+    admin_hash = await async_fetch_admin_hash(
+        hass,
+        entry.data[CONF_CLOUD_SID],
+        entry.data[CONF_CLOUD_ECODE],
+        entry.data[CONF_DEVICE_ID],
+        entry.data[CONF_LOCAL_KEY],
+        "backfill on startup",
+    )
+    if not admin_hash:
+        return
+
+    new_data = dict(entry.data)
+    new_data[CONF_P2P_ADMIN_USER] = DEFAULT_P2P_ADMIN_USER
+    new_data[CONF_P2P_ADMIN_HASH] = admin_hash
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    _LOGGER.info("admin-hash backfilled from cloud for %s", entry.title)
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 def _build_stream_manager(
     hass: HomeAssistant, entry: ConfigEntry,
 ) -> PetLibroStreamManager | None:
-    """Construct the on-demand video stream manager when config supports it.
+    """Construct the on-demand video stream manager.
 
-    Video requires two separate secrets the user supplies via the config
-    flow: the Tuya cloud session (sid + ecode + uid, derived from email +
-    password login) and the device P2P admin hash. All other features of
-    the integration work without either.
-
-    Returns None when any requirement is missing — the camera platform is
-    only registered when this returns a manager.
+    Camera entity is part of the integration's standard feature set —
+    it's only skipped when the cloud session is unavailable (e.g. an
+    expired session on a legacy entry where the user hasn't run the
+    reconfigure flow yet).
     """
     admin_hash = entry.data.get(CONF_P2P_ADMIN_HASH)
     sid = entry.data.get(CONF_CLOUD_SID)

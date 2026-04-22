@@ -25,18 +25,17 @@ Home Assistant integration for **already-paired PetLibro smart feeders that use 
 
 ## Features
 
-- **Local LAN control** — no cloud account required for any of this:
-  - Manual feed (1–50 portions)
-  - Schedule list: add / update / remove / replace
-  - Master on/off, food-level + state sensors, warning sensor, last-manual / last-scheduled timestamps
-  - `sensor.*_next_feed` (timestamp), `sensor.*_portions_today` (running daily total), `binary_sensor.*_feeding_plan_active`
-  - Rolling feed + warning log persisted across HA restarts
-  - `petlibro_lite_feed` / `petlibro_lite_warning` events on the HA bus for automations + Logbook
-- **Optional live video** (experimental, video-only):
-  - WebRTC → KCP → AES-CBC H.264 pulled from the feeder, transcoded to HLS via HA's `stream` component
-  - Camera entity with a `stream_state` attribute so UIs can render a "Connecting…" overlay during handshake
-  - Auto-retry on auth failure (matches the app's own retry behavior)
-  - Requires both a PetLibro Lite account login (exchanged for a Tuya session) and a P2P admin hash that has to be captured manually — see [Video setup](#video-setup). None of that is needed for anything else.
+One sign-in, everything included:
+
+- Manual feed (1–50 portions)
+- Schedule list: add / update / remove / replace
+- Master on/off, food-level + state sensors, warning sensor, last-manual / last-scheduled timestamps
+- `sensor.*_next_feed` (timestamp), `sensor.*_portions_today` (running daily total), `binary_sensor.*_feeding_plan_active`
+- Rolling feed + warning log persisted across HA restarts
+- `petlibro_lite_feed` / `petlibro_lite_warning` events on the HA bus for automations + Logbook
+- Live video: WebRTC → KCP → AES-CBC H.264 pulled from the feeder, transcoded to HLS via HA's `stream` component. Camera entity exposes a `stream_state` attribute so UIs can render a "Connecting…" overlay during handshake, and auto-retries on auth failure (matches the app's own retry behavior).
+
+After setup, LAN control runs entirely offline. The cloud session is only used at runtime for the WebRTC signaling that starts a video stream.
 
 ## Included Lovelace card
 
@@ -78,29 +77,13 @@ Only thing required: your **PetLibro Lite mobile app email + password**.
 
 **Settings → Devices & Services → Add Integration → PetLibro Lite.**
 
-The integration signs into Tuya's whitelabel cloud with those credentials, runs a LAN UDP scan to find your feeder, and calls `tuya.m.device.get` once per discovered device to pull the `localKey` — everything needed for LAN control is derived automatically. Your password isn't persisted; only the short-lived session tokens are.
+The integration signs into Tuya's whitelabel cloud with those credentials, runs a LAN UDP scan to find your feeder, and calls `tuya.m.device.get` once per discovered device to pull the `localKey`. It then derives the P2P admin hash needed for live video from the same cloud session — no manual capture, no separate setup step.
 
-If you have multiple feeders, you'll see a picker. If your router blocks UDP broadcast or the feeder is on a different subnet, there's an optional "LAN IP" field on the first step that skips scanning.
+If you have multiple feeders, you'll see a picker. If your router blocks UDP broadcast or the feeder is on a different subnet, there's a "LAN IP" field on the follow-up step that skips scanning.
 
-Optional second step — **Live video**: paste a P2P admin hash (capture via the procedure in [`docs/video_setup.md`](./docs/video_setup.md)) to register a camera entity. Leave blank to run without video.
+If video stops working later (e.g. the cloud session expired), open **Settings → Devices & Services → PetLibro Lite → Configure** and sign in again — the admin hash is refreshed automatically.
 
 > Note: this integration depends on the [`tinytuya`](https://github.com/jasonacox/tinytuya) Python library but handles discovery itself — you don't need to run `tinytuya wizard` yourself. And **it's unrelated to the LocalTuya HACS integration**, despite the similar name.
-
-## Video setup
-
-Live video is the only feature that needs cloud credentials. Two things are required:
-
-1. **PetLibro Lite account email + password.** The integration logs in once and exchanges these for a short-lived Tuya session (sid / ecode / uid) used by the WebRTC offer. The password is not persisted.
-2. **P2P admin hash.** A per-device 32-character secret the feeder was provisioned with at pairing. Capturing it today requires Frida instrumentation of the PetLibro Lite mobile app — see [`docs/video_setup.md`](./docs/video_setup.md).
-
-Non-video features don't need any of this. If you skip the second config step, the integration just runs without a camera.
-
-To set it up:
-
-1. Follow [`docs/video_setup.md`](./docs/video_setup.md) for the one-time hash capture.
-2. Open **Settings → Devices & Services → PetLibro Lite → Configure**, paste the email / password / admin hash, and save.
-
-Planned for v0.2: reverse-engineer either the `thing.m.*` cloud namespace or the LAN `LAN_EXT_STREAM` (cmd 0x40) register path so the hash can be auto-fetched.
 
 ## Entities (per feeder)
 

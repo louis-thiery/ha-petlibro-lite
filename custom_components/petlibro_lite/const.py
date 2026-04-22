@@ -46,11 +46,12 @@ MIN_PORTIONS = 1
 MAX_PORTIONS = 50
 MAX_SCHEDULE_SLOTS = 20          # the app caps around here; device may accept more
 
-# --- cloud login (video only) ------------------------------------------------
-# Cloud email/password are used solely to exchange for a Tuya session
-# (sid/ecode/uid) that the WebRTC video handshake requires. The integration
-# runs fully LAN-only for every non-video feature, so leaving these blank is
-# the common case.
+# --- cloud login -------------------------------------------------------------
+# Setup requires the user's PetLibro Lite email + password — we exchange
+# them for a Tuya session (sid/ecode/uid) once, then derive both
+# `localKey` (used for LAN control) and `p2p_admin_hash` (used for
+# video signaling) from that session. LAN control runs fully offline
+# after setup; the cloud session is needed at runtime only for video.
 CONF_CLOUD_EMAIL = "cloud_email"
 CONF_CLOUD_PASSWORD = "cloud_password"
 CONF_CLOUD_COUNTRY_CODE = "cloud_country_code"
@@ -71,12 +72,9 @@ EVENT_FEED = "petlibro_lite_feed"
 EVENT_WARNING = "petlibro_lite_warning"
 
 # --- video / P2P admin credentials -------------------------------------------
-# Device-level P2P admin user + hash (Tuya-whitelabel "admin" over KCP on conv=0
-# binary stream). The Tuya cloud endpoint that issues them hasn't been reverse
-# engineered yet — for now these are captured by the user out-of-band (see the
-# README section on camera setup). When both are present we register the camera
-# platform; when either is missing, the integration runs without video (LAN +
-# cloud-log only).
+# Device-level P2P admin user + hash (Tuya-whitelabel "admin" over KCP on
+# conv=0 binary stream). Derived from the cloud session at setup time and
+# refreshed on reconfigure — the user never enters them.
 CONF_P2P_ADMIN_USER = "p2p_admin_user"
 CONF_P2P_ADMIN_HASH = "p2p_admin_hash"
 DEFAULT_P2P_ADMIN_USER = "admin"

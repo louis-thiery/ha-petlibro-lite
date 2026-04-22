@@ -1,10 +1,14 @@
 """Camera platform for the PetLibro feeder video feed.
 
-Registered only for config entries that include P2P admin credentials
-(both `p2p_admin_user` and `p2p_admin_hash`). The entity exposes the
-feeder's live HEVC feed via Home Assistant's Stream component — HA
-transcodes the integration-provided HLS playlist and serves the browser
-an hls.js/<video> source.
+Standard feature of the integration — every feeder gets a camera
+entity. The feed is the feeder's live HEVC stream via Home Assistant's
+Stream component; HA transcodes the integration-provided HLS playlist
+and serves the browser an hls.js/<video> source.
+
+The only time camera registration is skipped is when the config entry
+is missing a cloud session (legacy entries where the session expired
+before the admin-hash backfill could run; fixed by running the
+reconfigure flow).
 
 Stream lifecycle is managed by `PetLibroStreamManager` on-demand: the
 upstream RTC+KCP session only runs while a viewer is actively pulling
@@ -34,7 +38,7 @@ async def async_setup_entry(
 ) -> None:
     runtime: PetLibroRuntime = hass.data[DOMAIN][entry.entry_id]
     if runtime.stream is None:
-        # No P2P admin creds configured → no camera.
+        # Cloud session missing — see module docstring for recovery.
         return
     async_add_entities([PetLibroCamera(runtime, entry)])
 

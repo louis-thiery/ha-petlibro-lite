@@ -218,6 +218,70 @@ class TuyaApiClient:
             },
         )
 
+    def get_admin_hash(self, dev_id: str, local_key: str) -> str:
+        """Derive the P2P admin hash for a PetLibro feeder.
+
+        Formula (reversed 2026-04-22 via frida on
+        `com.thingclips.smart.camera.utils.chaos.MD5Utils.b`):
+
+            admin_hash = md5(password + "||" + local_key).hexdigest()
+
+        where:
+          - `password` is the TUTK Kalay device password, returned as
+            `result.password` by `smartlife.m.rtc.session.offer`
+          - `local_key` is the device's cloud-registered `localKey`
+        """
+        sid_hint = self.sid or "adminhash"
+        sdp_offer = {
+            "header": {
+                "from": sid_hint,
+                "to": dev_id,
+                "sessionid": f"{dev_id}adminhash",
+                "moto_id": "",
+                "type": "offer",
+                "trace_id": "",
+                "is_pre": 1,
+                "p2p_skill": 99,
+            },
+            "msg": {
+                "sdp": (
+                    "v=0\r\n"
+                    "o=- 1 1 IN IP4 127.0.0.1\r\n"
+                    "s=-\r\nt=0 0\r\n"
+                    "a=group:BUNDLE imm0\r\n"
+                    f"a=msid-semantic: WMS {dev_id}adminhash\r\n"
+                    "m=application 9 imm 6001\r\n"
+                    "c=IN IP4 0.0.0.0\r\n"
+                    "a=rtcp:9 IN IP4 0.0.0.0\r\n"
+                    "a=ice-ufrag:dumy\r\n"
+                    "a=ice-pwd:dummypasswordabcdefghij\r\n"
+                    "a=ice-options:trickle\r\n"
+                    "a=aes-key:00000000000000000000000000000000\r\n"
+                    "a=mid:imm0\r\n"
+                    "a=rtpmap:6001 AES/KCP 330\r\n"
+                    f"a=ssrc:0 cname:{sid_hint}\r\n"
+                ),
+            },
+        }
+        offer = self.rtc_session_offer(dev_id, sdp_offer)
+        if not offer.get("success"):
+            raise RuntimeError(f"rtc.session.offer failed: {offer}")
+        password = (offer.get("result") or {}).get("password")
+        if not password:
+            raise RuntimeError(
+                "rtc.session.offer response missing 'password' field"
+            )
+        return hashlib.md5(f"{password}||{local_key}".encode()).hexdigest()
+
+
+def derive_admin_hash_sync(
+    sid: str, ecode: str, dev_id: str, local_key: str,
+) -> str:
+    """Module-level sync wrapper for `hass.async_add_executor_job`."""
+    return TuyaApiClient(sid=sid, ecode=ecode).get_admin_hash(
+        dev_id, local_key=local_key,
+    )
+
     def call(
         self,
         api: str,
