@@ -8,10 +8,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import socket
 from typing import Any
 
 
 _LOGGER = logging.getLogger(__name__)
+
+# Optional fallback used by probe_ip() when the LAN scan can't see the
+# feeder (notably Docker-on-Windows: Docker Desktop's NAT blocks the
+# inbound UDP broadcasts tinytuya relies on, even though direct TCP to
+# the feeder works fine). When this file exists, it should be a JSON
+# object of `{"<ip>": {"gwId": "<gw>", "version": "3.3" | "3.4"}}`.
+_KNOWN_DEVICES_PATH = "/config/petlibro_lite_known.json"
+_TUYA_LAN_PORT = 6668
 
 
 def _normalize_scan(raw: Any) -> dict[str, dict[str, Any]]:
@@ -57,21 +67,78 @@ def lan_scan(forcescan: bool = False) -> dict[str, dict[str, Any]]:
     return _normalize_scan(raw)
 
 
+def _load_known_devices() -> dict[str, dict[str, Any]]:
+    """Read `_KNOWN_DEVICES_PATH` if present. Returns an empty dict on
+    any read/parse error so callers can degrade gracefully."""
+    if not os.path.exists(_KNOWN_DEVICES_PATH):
+        return {}
+    try:
+        with open(_KNOWN_DEVICES_PATH) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as err:
+        _LOGGER.warning(
+            "probe_ip: failed to read %s: %s", _KNOWN_DEVICES_PATH, err,
+        )
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _tcp_alive(ip: str, port: int = _TUYA_LAN_PORT, timeout: float = 3.0) -> bool:
+    """Return True if a TCP connection to `ip:port` succeeds within `timeout`."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+
 def probe_ip(ip: str) -> dict[str, Any] | None:
     """Try to locate a Tuya device at `ip`. Returns its scan entry
     (`{"ip": ..., "gwId": ..., "version": ..., ...}`) or None.
 
-    Strategy: run a normal passive scan first — often enough because a
-    target you know the IP of is typically alive and broadcasting. If
-    passive finds nothing for that IP, escalate to `forcescan=True`
-    which actively probes subnets and tends to hit devices broadcast
-    can't reach.
+    Strategy:
+
+    1. Run a normal passive scan first — usually enough because a
+       target you know the IP of is typically alive and broadcasting.
+    2. If passive finds nothing for that IP, escalate to
+       `forcescan=True` which actively probes subnets.
+    3. If both scans miss but TCP to `ip:6668` succeeds and an entry
+       for `ip` is present in `_KNOWN_DEVICES_PATH`, synthesize a scan
+       entry from that file. This covers setups where the host can't
+       see the Tuya UDP broadcasts (Docker-on-Windows is the most
+       common — Docker Desktop's NAT blocks inbound UDP) even though
+       direct TCP to the feeder works.
     """
     for forced in (False, True):
         scan = lan_scan(forcescan=forced)
         for entry in scan.values():
             if entry.get("ip") == ip:
                 return entry
+
+    if not _tcp_alive(ip):
+        return None
+
+    known = _load_known_devices()
+    entry = known.get(ip)
+    if entry and entry.get("gwId"):
+        _LOGGER.warning(
+            "probe_ip: %s LAN scan empty but TCP port %d open — using "
+            "known-devices JSON entry (gwId=%s)",
+            ip, _TUYA_LAN_PORT, entry["gwId"],
+        )
+        return {
+            "ip": ip,
+            "gwId": entry["gwId"],
+            "version": entry.get("version", "3.4"),
+            "_synthesized": True,
+        }
+
+    _LOGGER.warning(
+        "probe_ip: %s is reachable on TCP port %d but no gwId is known. "
+        "Add an entry to %s like "
+        '{"%s": {"gwId": "<your gateway id>", "version": "3.4"}}',
+        ip, _TUYA_LAN_PORT, _KNOWN_DEVICES_PATH, ip,
+    )
     return None
 
 
