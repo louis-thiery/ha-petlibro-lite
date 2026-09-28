@@ -273,15 +273,6 @@ class TuyaApiClient:
             )
         return hashlib.md5(f"{password}||{local_key}".encode()).hexdigest()
 
-
-def derive_admin_hash_sync(
-    sid: str, ecode: str, dev_id: str, local_key: str,
-) -> str:
-    """Module-level sync wrapper for `hass.async_add_executor_job`."""
-    return TuyaApiClient(sid=sid, ecode=ecode).get_admin_hash(
-        dev_id, local_key=local_key,
-    )
-
     def call(
         self,
         api: str,
@@ -305,3 +296,12 @@ def derive_admin_hash_sync(
         else:
             key = crypto.request_key(request_id)
         return crypto.decrypt_response_with_key(payload["result"], key)
+
+
+def derive_admin_hash_sync(
+    sid: str, ecode: str, dev_id: str, local_key: str,
+) -> str:
+    """Module-level sync wrapper for `hass.async_add_executor_job`."""
+    return TuyaApiClient(sid=sid, ecode=ecode).get_admin_hash(
+        dev_id, local_key=local_key,
+    )
